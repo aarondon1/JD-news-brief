@@ -49,7 +49,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v4
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Restore seen.json cache
         id: cache-restore
