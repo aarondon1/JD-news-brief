@@ -1,0 +1,98 @@
+name: JD-news-brief
+
+on:
+  schedule:
+    - cron: "45 10 * * *" # 6:45am ET (10:45 UTC)
+  workflow_dispatch:
+    inputs:
+      max_per_source:
+        description: "Max items per source"
+        required: false
+        default: "4"
+      max_total:
+        description: "Max total items"
+        required: false
+        default: "16"
+      include:
+        description: "Include keywords (comma/semicolon)"
+        required: false
+        default: ""
+      exclude:
+        description: "Exclude keywords (comma/semicolon)"
+        required: false
+        default: ""
+      ignore_cache:
+        description: "Bypass dedupe cache?"
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Don't send; render+log only?"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: JD-news-brief
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: "3.11"
+
+      - name: Restore seen.json cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: data/seen.json
+          key: seen-${{ runner.os }}-v1-${{ github.run_id }}
+          restore-keys: |
+            seen-${{ runner.os }}-v1-
+
+      - name: Sync deps
+        run: uv sync
+
+      - name: Run morning brief
+        env:
+          PPLX_API_KEY: ${{ secrets.PPLX_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TZ: ${{ vars.TZ }}
+          MAX_ITEMS_PER_SOURCE: ${{ vars.MAX_ITEMS_PER_SOURCE }}
+          BRIEF_WORD_CAP: ${{ vars.BRIEF_WORD_CAP }}
+          BRIEF_MAX_TOKENS: ${{ vars.BRIEF_MAX_TOKENS }}
+          INCLUDE_KEYWORDS: ${{ vars.INCLUDE_KEYWORDS }}
+          EXCLUDE_KEYWORDS: ${{ vars.EXCLUDE_KEYWORDS }}
+        run: >
+          uv run python -m src.main
+          --max-per-source "${{ inputs.max_per_source }}"
+          --max-total "${{ inputs.max_total }}"
+          ${{ inputs.include != '' && format('--include "{0}"', inputs.include) || '' }}
+          ${{ inputs.exclude != '' && format('--exclude "{0}"', inputs.exclude) || '' }}
+          ${{ inputs.ignore_cache && '--ignore-cache' || '' }}
+          ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Upload brief artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefs
+          path: data/brief-*.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Save seen.json cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/seen.json
+          key: seen-${{ runner.os }}-v1-${{ github.run_id }}

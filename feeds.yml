@@ -1,0 +1,35 @@
+# Solid, RSS-only sources (no HTML scraping)
+- name: Reuters Business
+  url: https://www.reuters.com/markets/feed/
+  type: rss
+
+- name: Financial Times (Top Stories)
+  url: https://www.ft.com/?format=rss
+  type: rss
+
+# --- Bloomberg (unofficial public RSS endpoints) ---
+- name: Bloomberg Markets
+  url: https://feeds.bloomberg.com/markets/news.rss
+  type: rss
+
+- name: Bloomberg Economics
+  url: https://feeds.bloomberg.com/economics/news.rss
+  type: rss
+
+# --- Seeking Alpha ---
+# Try this first (site-wide feed many aggregators use)
+# - name: Seeking Alpha (Feed)
+#   url: https://seekingalpha.com/feed.xml
+#   type: rss
+# If the line above ever returns nothing for you, try this “Breaking News” feed:
+- name: Seeking Alpha (Breaking News)
+  url: https://seekingalpha.com/market_currents.xml
+  type: rss
+# --- Optional Google News fallbacks (use if a direct feed is ever flaky) ---
+# - name: Bloomberg (Google News Markets)
+#   url: https://news.google.com/rss/search?q=site:bloomberg.com+markets&hl=en-US&gl=US&ceid=US:en
+#   type: rss
+#
+# - name: Seeking Alpha (Google News)
+#   url: https://news.google.com/rss/search?q=site:seekingalpha.com&hl=en-US&gl=US&ceid=US:en
+#   type: rss

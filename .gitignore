@@ -1,0 +1,26 @@
+# venvs & python junk
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# env & local config
+.env
+.env.*
+*.local
+
+# run outputs / logs
+data/seen.json
+data/brief-*.txt
+
+# uv caches (safe to ignore locally)
+.uv/
