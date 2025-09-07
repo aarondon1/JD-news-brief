@@ -137,11 +137,14 @@ def main():
     # 4) optional cap on total items (before summarization to save tokens)
     capped = _limit_total(fresh, args.max_total)
 
-    if not capped:
-        text = "Morning Brief — no new items passed filters."
-        _log_brief(text)
-        print(text)
-        return
+    # even if we bypassed de-dupe, record these as seen so subsequent runs don’t repeat
+    if args.ignore_cache and capped:
+        try:
+            from src.util.cache import mark_seen
+            mark_seen(capped)
+        except Exception:
+            pass
+
 
     # 5) summarize
     summarizer = SonarSummarizer()
