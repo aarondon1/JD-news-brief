@@ -1,4 +1,4 @@
-import os, yaml, time, json, argparse
+import os, yaml, time, argparse
 from typing import List, Dict
 from datetime import datetime
 from dotenv import load_dotenv
@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from src.ingest.rss import fetch_rss
 from src.ingest.html_list import fetch_html_list
 from src.summarize.sonar import SonarSummarizer
-from src.util.cache import filter_new
+from src.util.cache import filter_new, mark_seen
 from src.format.html import render_html, render_text
 from src.senders.discord import send_discord
 # from src.senders.whatsapp_cloud import send_whatsapp_brief  # enable later
@@ -70,7 +70,7 @@ def load_feeds(path: str = "feeds.yml") -> List[Dict]:
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
-def collect_items(feeds: List[Dict], per_source: int) -> List[Dict]:
+def collect_items(feeds: List[Dict], per_source: int, debug: bool = False) -> List[Dict]:
     items: List[Dict] = []
     for f in feeds:
         t = f.get("type", "rss")
@@ -81,7 +81,9 @@ def collect_items(feeds: List[Dict], per_source: int) -> List[Dict]:
             for g in got:
                 g["source"] = name
                 items.append(g)
-        except Exception:
+        except Exception as e:
+            if debug:
+                print(f"[ingest] skipped {name} ({url}) due to: {e}")
             continue
     return items
 
@@ -102,6 +104,7 @@ def _parse_args():
     p.add_argument("--ignore-cache", action="store_true", help="Bypass dedupe (send even if seen before)")
     p.add_argument("--no-filter", action="store_true", help="Disable keyword filtering")
     p.add_argument("--dry-run", action="store_true", help="Do everything except send to Discord/WhatsApp")
+    p.add_argument("--debug", action="store_true", help="Verbose debug logging to stdout")
     return p.parse_args()
 
 
@@ -110,46 +113,84 @@ def _parse_args():
 def main():
     load_dotenv()
     args = _parse_args()
+    debug = args.debug or bool(os.getenv("DEBUG"))
 
     # Defaults from env, CLI overrides if provided
     per_source = args.max_per_source or int(os.getenv("MAX_ITEMS_PER_SOURCE", "5"))
     include_env = os.getenv("INCLUDE_KEYWORDS")
     exclude_env = os.getenv("EXCLUDE_KEYWORDS")
 
+    # Identify run source (helps in Discord + logs)
+    event = os.getenv("GITHUB_EVENT_NAME", "")
+    run_tag = "AUTO (schedule)" if event == "schedule" else ("MANUAL (dispatch)" if event == "workflow_dispatch" else "LOCAL")
+
     # 1) ingest
     feeds = load_feeds()
-    raw = collect_items(feeds, per_source)
+    if debug:
+        print(f"[config] run_tag={run_tag} per_source={per_source}")
+        print(f"[config] feeds= {[f['name'] for f in feeds]}")
+
+    raw = collect_items(feeds, per_source, debug=debug)
+    if debug:
+        print(f"[counts] ingested={len(raw)}")
 
     # 2) keyword filter
     if args.no_filter:
         filtered = raw
+        if debug:
+            print("[filter] disabled via --no-filter")
     else:
         include_s = args.include if args.include is not None else include_env
         exclude_s = args.exclude if args.exclude is not None else exclude_env
+        if debug:
+            print(f"[filter] include={include_s} exclude={exclude_s}")
         filtered = _apply_keyword_filter(raw, include_s, exclude_s)
+
+    if debug:
+        print(f"[counts] after_filter={len(filtered)}")
+        for it in filtered[:5]:
+            print(f"  • {it.get('title','')[:90]}  [{it.get('source','')}]")
 
     # 3) dedupe or bypass
     if args.ignore_cache:
         fresh = filtered
+        if debug:
+            print("[dedupe] bypassed via --ignore-cache")
     else:
         fresh = filter_new(filtered)
+        if debug:
+            print(f"[dedupe] kept={len(fresh)} (cache applied)")
 
     # 4) optional cap on total items (before summarization to save tokens)
     capped = _limit_total(fresh, args.max_total)
+    if debug:
+        print(f"[counts] after_cap={len(capped)} (max_total={args.max_total})")
 
     # even if we bypassed de-dupe, record these as seen so subsequent runs don’t repeat
     if args.ignore_cache and capped:
         try:
-            from src.util.cache import mark_seen
             mark_seen(capped)
-        except Exception:
-            pass
+            if debug:
+                print(f"[dedupe] marked {len(capped)} items as seen (post-bypass)")
+        except Exception as e:
+            if debug:
+                print(f"[dedupe] mark_seen failed: {e}")
 
+    if not capped:
+        msg = f"[{run_tag}]\nMorning Brief — no new items passed filters."
+        _log_brief(msg)
+        if debug:
+            print(msg)
+        # Don’t send an empty brief to Discord; comment the next line if you DO want a heartbeat
+        # if not args.dry_run: send_discord(msg)
+        return
 
     # 5) summarize
     summarizer = SonarSummarizer()
     summarized: List[Dict] = []
-    for it in capped:
+    for idx, it in enumerate(capped, 1):
+        if debug:
+            print(f"[summ] {idx}/{len(capped)}: {it.get('title','')[:100]}  [{it.get('source','')}]")
         summary = summarizer.summarize_one(
             it.get("title", ""), it.get("dek", ""), it.get("source", "")
         )
@@ -164,9 +205,12 @@ def main():
     # 6) render
     html_body = render_html(summarized)
     text_body = render_text(summarized)
+    text_body = f"[{run_tag}]\n" + text_body  # tag the run type for quick visibility
 
     # 7) deliver (unless dry-run)
     if not args.dry_run:
+        if debug:
+            print(f"[send] discord chars={len(text_body)}")
         send_discord(text_body)
         # send_whatsapp_brief(text_body)  # enable later
 
@@ -179,12 +223,7 @@ if __name__ == "__main__":
     main()
 
 
-# Local: “grab more headlines now”: 
+# Local examples:
 # uv run python -m src.main --max-per-source 6 --max-total 20 --include "Fed,CPI,earnings,ECB" --exclude "opinion"
-
-# Bypass filters, ignore cache:
 # uv run python -m src.main --ignore-cache --max-per-source 5 --max-total 25
-
-# Dry run (no sending):
-#uv run python -m src.main --dry-run --max-per-source 4 --max-total 16
-
+# uv run python -m src.main --dry-run --max-per-source 4 --max-total 16 --debug

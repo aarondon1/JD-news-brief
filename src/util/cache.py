@@ -6,7 +6,6 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 CACHE_PATH = os.environ.get("SEEN_CACHE_PATH", "data/seen.json")
 TTL_SECONDS = int(os.environ.get("SEEN_TTL_SECONDS", str(72*3600)))  # default 72h
 
-# Utility functions for caching seen URLs with TTL
 def _now() -> int:
     return int(time.time())
 
@@ -31,7 +30,7 @@ def _canonicalize(url: str) -> str:
         u = urlsplit(url.strip())
         scheme = "https" if u.scheme in ("http", "https") else u.scheme
         netloc = u.netloc.lower()
-        path = u.path.rstrip("/")  # drop trailing slash
+        path = u.path.rstrip("/")
         # drop common tracking params
         drop = {"utm_source","utm_medium","utm_campaign","utm_term","utm_content",
                 "ocid","cmpid","sref","srnd","ref"}
